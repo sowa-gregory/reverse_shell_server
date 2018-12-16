@@ -1,139 +1,206 @@
-const net = require("net");
-const readline = require("readline");
+const moduleNet = require("net");
+const moduleReadLine = require("readline");
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
+/**
+ * TODO:
+ * Split server logic from displaying and colouring incoming messages. Dedicated class will be used for view.
+ */
 
-var server = new net.Server();
-var sessions_dict = {};
+/**
+ *  Class, which provides multisession shell server functionality.
+ */
+class ShellServer {
+  /**
+   * Class constructor
+   * @param {integer} port - number of port to listen connection on
+   */
+  constructor(port) {
+    this.readLine = moduleReadLine.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
 
-// number of all connected sessions (might already be disconnected)
-// each connected session has its own unique identifier
-var max_session_number = 1;
+    /* dictionary containing all connected sessions identifiers */
+    this.sessionsDict = {};
 
-// number of session to which commands from input line will be send
-var active_session = 0;
+    /* server object */
+    this.server = new moduleNet.Server();
 
-Reset = "\x1b[0m";
-FgRed = "\x1b[31m";
-FgGreen = "\x1b[32m";
-FgYellow = "\x1b[33m";
-FgBlue = "\x1b[34m";
-FgWhite = "\x1b[37m";
+    // number of all connected sessions (might already be disconnected)
+    // each connected session has its own unique identifier
+    this.maxSessionNumber = 1;
 
-server.on("connection", function(socket) {
-  console.log(socket.remoteAddress);
-  let session_id = max_session_number++;
-  sessions_dict[session_id] = socket;
+    // number of session to which commands from input line will be send
+    this.activeSession = 0;
 
-  printSessionPrefix(FgGreen, session_id);
-  process.stdout.write(socket.remoteAddress + " " + socket.remotePort + "\n");
+    this.server.on("connection", socket => this.onNewConnection(socket));
+    this.readLine.on("line", line => this.onReadLine.call(this, line));
 
-  // if no active sessions - connected session becomes active session_id
-  if (active_session == 0) active_session = session_id;
-
-  socket.on("data", data => {
-    receivedData(session_id, data);
-  });
-  socket.on("close", () => {
-    connClosed(session_id);
-  });
-  socket.on("error", () => {
-    connError(session_id);
-  });
-});
-
-rl.on("line", line => {
-  if (active_session == 0) {
-    printInputReady();
-    return;
+    this.server.listen(port);
+    writeln(FgWhite + "Reverse Shell Server v1.1 - listening on port:" + port);
+    writeln(
+      "CmdLine - enter:\n@ - to list all connected sessions\n@n - to switch to session number\n@exit - to exit\n"
+    );
+    this.printInputReady();
   }
 
-  // no special command in input line
-  if (!line.startsWith("@")) {
-    sessions_dict[active_session].write(line);
-    return;
+  /**
+   *
+   * @param {Socket} socket
+   */
+  onNewConnection(socket) {
+    write(socket.remoteAddress);
+    const sessionId = this.maxSessionNumber++;
+    this.sessionsDict[sessionId] = socket;
+
+    this.printSessionPrefix(FgGreen, sessionId);
+    writeln(socket.remoteAddress + " " + socket.remotePort);
+
+    // if no active sessions - connected session becomes active session_id
+    if (this.activeSession == 0) this.activeSession = sessionId;
+
+    socket.on("data", data => this.onReceivedData(sessionId, data));
+    socket.on("close", () => this.onConnectionClosed(sessionId));
+    socket.on("error", () => this.onConnectionError(sessionId));
   }
 
-  if (line === "@") {
-    // list all sessions
-    let keys = Object.keys(sessions_dict);
-    process.stdout.write("Existing sessions:");
-    for (let index in keys) {
-      if (index > 0) process.stdout.write(" ");
-      process.stdout.write("[" + keys[index] + "]");
+  /**
+   *  Prints input ready mark containing active session id.
+   */
+  printInputReady() {
+    this.printSessionPrefix(FgBlue, this.activeSession);
+  }
+
+  /**
+   *
+   * @param {string} line
+   */
+  onReadLine(line) {
+    if (line === "@exit") {
+      write(RESET);
+      process.exit(0);
     }
-    process.stdout.write("\n");
-  } else {
-    // special command - starts with @ provided in input line
-    let temp_id = parseInt(line.substr(1));
-    if (isNaN(temp_id)) console.log("Invalid session number");
-    else if (temp_id in sessions_dict) active_session = temp_id;
-    else console.log("No session number:" + temp_id + " exists");
-  }
-  printInputReady();
-});
 
-function printInputReady() {
-  printSessionPrefix(FgBlue, active_session);
-}
+    // no active sessions -> not necessary to interpret session listing and switching commands
+    if (this.activeSession == 0) {
+      this.printInputReady();
+      return;
+    }
 
-function printSessionPrefix(color, session_id) {
-  if (session_id == 0) process.stdout.write(color + "[-no-sessions-] ");
-  else process.stdout.write(color + "[" + session_id.toString() + "] ");
-}
+    // no special command in input line
+    if (!line.startsWith("@")) {
+      this.sessionsDict[this.activeSession].write(line);
+      return;
+    }
 
-function receivedData(session_id, data) {
-  let lines = data.toString().split("\n");
-  for (let index = 0; index < lines.length; index++) {
-    printSessionPrefix(FgYellow, session_id);
-    // lines contains '\r' char inside - caret return, which might cause side effects
-    let line = lines[index].replace("\r", "");
-    process.stdout.write(line);
-    process.stdout.write("\n");
-  }
-  printInputReady();
-}
-
-function connError(session_id) {
-  process.stdout.write("\n");
-  printSessionPrefix(FgRed, session_id);
-  process.stdout.write("session error\n");
-}
-
-function findNextSession(session_id) {
-  if (session_id == undefined) throw new Error("session_id is undefined");
-
-  // no more existing sessions
-  if (Object.keys(sessions_dict).length == 0) return 0;
-
-  // try to find next larger session number, than currently active
-  for (let i = session_id; i < max_session_number; i++) {
-    if (i in sessions_dict) return i;
+    if (line === "@") {
+      // list all sessions
+      const sessionKeys = Object.keys(this.sessionsDict);
+      write("Existing sessions:");
+      sessionKeys.forEach(key => {
+        write("[" + key + "]");
+      });
+      writeln();
+    } else {
+      // special command - starts with @ provided in input line
+      const tempId = parseInt(line.substr(1));
+      if (isNaN(tempId)) writeln("Invalid session number");
+      else if (tempId in this.sessionsDict) this.activeSession = tempId;
+      else writeln("No session number:" + tempId + " exists");
+    }
+    this.printInputReady();
   }
 
-  // try to find available session_id
-  for (let i = 1; i < session_id; i++) {
-    if (i in sessions_dict) return i;
+  /**
+   * Print
+   * @param {string} color
+   * @param {integer} sessionId
+   */
+  printSessionPrefix(color, sessionId) {
+    if (sessionId == 0) write(color + "[-no-sessions-] ");
+    else write(color + "[" + sessionId.toString() + "] ");
   }
-  throw new Error("sth went wrong");
-}
-es;
+  /**
+   * Called on socket received data
+   * @param {integer} sessionId
+   * @param {Buffer} data
+   */
+  onReceivedData(sessionId, data) {
+    const lines = data.toString().split("\n");
+    for (let index = 0; index < lines.length; index++) {
+      this.printSessionPrefix(FgYellow, sessionId);
+      // lines contains '\r' char inside - caret return, which might cause side effects
+      process.stdout.write(lines[index].replace("\r", "") + "\n");
+    }
+    this.printInputReady();
+  }
 
-function connClosed(session_id) {
-  printSessionPrefix(FgRed, session_id);
-  process.stdout.write("session disconnected\n");
-  delete sessions_dict[session_id];
-  active_session = findNextSession(session_id);
-  printInputReady();
+  /**
+   *
+   * @param {integer} sessionId
+   */
+  onConnectionError(sessionId) {
+    if (sessionId == undefined) throw new Error("sessionId is undefined");
+    writeln();
+    this.printSessionPrefix(FgRed, sessionId);
+    writeln("session error");
+  }
+
+  /**
+   * Socket connection close event handler.
+   * @param {*} sessionId
+   */
+  onConnectionClosed(sessionId) {
+    this.printSessionPrefix(FgRed, sessionId);
+    process.stdout.write("session disconnected\n");
+    delete this.sessionsDict[sessionId];
+    this.activeSession = this.findNextSession(sessionId);
+    this.printInputReady();
+  }
+  /**
+   *
+   * @param {*} sessionId
+   * @return {Integer}
+   */
+  findNextSession(sessionId) {
+    if (sessionId == undefined) throw new Error("sessionId is undefined");
+
+    // no more existing sessions
+    if (Object.keys(this.sessionsDict).length == 0) return 0;
+
+    // try to find next larger session number, than currently active
+    for (let i = sessionId; i < this.maxSessionNumber; i++)
+      if (i in this.sessionsDict) return i;
+
+    // try to find available session_id
+    for (let i = 1; i < sessionId; i++) if (i in this.sessionsDict) return i;
+
+    throw new Error("sth went wrong");
+  }
+}
+
+const RESET = "\x1b[0m";
+const FgRed = "\x1b[31m";
+const FgGreen = "\x1b[32m";
+const FgYellow = "\x1b[33m";
+const FgBlue = "\x1b[34m";
+const FgWhite = "\x1b[37m";
+
+/**
+ *
+ * @param {string} msg
+ */
+function write(msg) {
+  process.stdout.write(msg);
+}
+
+/**
+ *
+ * @param {string} msg
+ */
+function writeln(msg) {
+  process.stdout.write(msg + "\n");
 }
 
 const port = 10000;
-server.listen(port);
-console.log("Reverse Shell Server v1.0 - listening on port:" + port);
-console.log(
-  "CmdLine - enter:\n@ - to list all connected sessions\n@n - to switch to session number n\n\n"
-);
-printInputReady();
+new ShellServer(port);
