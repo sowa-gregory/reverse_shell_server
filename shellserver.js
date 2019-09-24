@@ -225,5 +225,5 @@ function writeln(msg) {
   process.stdout.write(msg + "\n");
 }
 
-const port = 10000;
+const port = 443;
 new ShellServer(port);
