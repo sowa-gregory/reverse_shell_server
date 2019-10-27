@@ -4,9 +4,12 @@
   "description": "",
   "main": "shellserver.js",
   "scripts": {
-    "start" : "node shellserver.js",
+    "start": "node shellserver.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Grzegorz Sowa",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "stdout-stream": "^1.4.1"
+  }
 }
